@@ -715,7 +715,14 @@ pub fn serializer(
 /// Test whether a value can be serialized and deserialized back into the original value, with options for endian and packing.
 /// `expectEqlFn` should be a function type of signature `fn (a: T, b: T) !void` which returns an error if `a != b`.
 /// In general, it is advised to just pass in `std.testing.expectEqual` here.
-fn testSerializableDeserializableExtra(comptime endian: std.builtin.Endian, comptime packing: Packing, comptime T: type, x: T, allocator: mem.Allocator, expectEqlFn: anytype) !void {
+fn testSerializableDeserializableExtra(
+    comptime endian: std.builtin.Endian,
+    comptime packing: Packing,
+    comptime T: type,
+    x: T,
+    allocator: mem.Allocator,
+    expectEqlFn: anytype,
+) !void {
     // we use this as a buffer to write our serialized data to
     var serialized_data = std.ArrayList(u8).init(testing.allocator);
     defer serialized_data.deinit();
