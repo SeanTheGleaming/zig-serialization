@@ -1,5 +1,7 @@
 # Zig Serialization
 Zig Serialization provides an easy to use interface to portably serialize and deserialize binary data to and from std readers and writers.
+
+This library is based on the now-removed `io.serialization` API from the zig standard library. You can find the original code [here](https://github.com/ziglang/std-lib-orphanage/blob/master/std/serialization.zig) in the [ziglang/std-lib-orphanage](https://github.com/ziglang/std-lib-orphanage) repository.
 ## How to use in your project
 ### Adding dependency to your build script
 To add this library as a dependency, run the following in your build folder:
