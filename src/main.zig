@@ -541,20 +541,6 @@ pub fn Deserializer(comptime _endian: std.builtin.Endian, comptime _packing: Pac
                         }
                         return error.Corrupt;
                     }
-
-                    //                     break :blk switch (try self.allocatingDeserialize(Tag, allocator)) {
-                    //                         inline else => |tag| {
-                    //                             switch (comptime fasterDeserializeType(meta.TagPayload(T, tag))) {
-                    //                                 .pointer => {
-                    //                                     ptr.* = @unionInit(T, @tagName(tag), undefined);
-                    //                                     return self.allocatingDeserializeInto(&@field(ptr, @tagName(tag)), allocator);
-                    //                                 },
-                    //                                 .value => {
-                    //                                     ptr.* = @unionInit(T, @tagName(tag), try self.allocatingDeserialize(meta.TagPayload(T, tag), allocator));
-                    //                                 },
-                    //                             }
-                    //                         },
-                    //                     };
                 },
                 .Array => {
                     for (ptr) |*item| {
