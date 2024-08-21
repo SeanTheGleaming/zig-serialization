@@ -4,9 +4,8 @@ Zig Serialization provides an easy to use interface to portably serialize and de
 ### Adding dependency to your build script
 To add this library as a dependency, run the following in your build folder:
 ```sh
-zig fetch https://github.com/SeanTheGleaming/zig-serialization/archive/master.tar.gz --save=serialization
+zig fetch git+https://github.com/SeanTheGleaming/zig-serialization --save=serialization
 ```
-It is recommended that you replace `master` in the link in this command with the latest version hash to avoid breaking changes
 ### In your build script
 ```zig
 pub fn build(b: *std.Build) void {
