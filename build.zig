@@ -9,7 +9,6 @@ pub fn build(b: *std.Build) void {
     const src_dir = "src";
 
     const install_step = b.getInstallStep();
-    const uninstall_step = b.getUninstallStep();
 
     const fmt_step = b.step("fmt", "Format the source code");
     const test_step = b.step("test", "Run the unit tests");
@@ -58,7 +57,4 @@ pub fn build(b: *std.Build) void {
         .install_subdir = "",
     });
     doc_step.dependOn(&doc_install.step);
-
-    const rm_install_dir = b.addRemoveDirTree("zig-out");
-    uninstall_step.dependOn(&rm_install_dir.step);
 }
