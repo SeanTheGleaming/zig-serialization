@@ -291,25 +291,35 @@ pub fn deserializeNeedsAllocator(comptime T: type) bool {
     };
 }
 
-fn signedness(comptime T: type) std.builtin.Signedness {
+fn noData(comptime T: type) bool {
     return switch (@typeInfo(T)) {
-        .Int => |int| int.signedness,
-        .Float => .signed,
-        else => .unsigned,
+        .Null, .Undefined, .Void => true,
+        .ComptimeInt,
+        .ComptimeFloat,
+        .Fn,
+        .EnumLiteral,
+        .Frame,
+        .AnyFrame,
+        .Opaque,
+        => false,
+        .Int, .Float => @bitSizeOf(T) == 0,
+        .Enum => |e| noData(e.tag_type) or (e.fields.len <= 1 and e.is_exhaustive),
+        .Array => |a| a.len == 0 or noData(a.child),
+        .Vector => |a| a.len == 0 or noData(a.child),
+        else => @bitSizeOf(T) == 0,
     };
 }
 
-fn portableLayout(comptime T: anytype) bool {
-    const info = @typeInfo(T);
-    return comptime switch (info) {
+fn portableLayout(comptime T: type) bool {
+    return noData(T) or switch (@typeInfo(T)) {
         .Int, .Float, .Void, .Null, .Undefined => true,
-        .Struct => |Struct| Struct.layout == .@"packed" or @sizeOf(T) == 0,
-        .Union => |Union| Union.layout == .@"packed" or @sizeOf(T) == 0,
+        .Struct => |Struct| Struct.layout == .@"packed",
+        .Union => |Union| Union.layout == .@"packed",
         else => false,
     };
 }
 
-/// Whether the type uses any custom serialization function
+/// whether we can serialize by @bitCasting to/from bytes
 fn intSerializable(comptime T: type) bool {
     return portableLayout(T) and !containsCustomSerialize(T);
 }
