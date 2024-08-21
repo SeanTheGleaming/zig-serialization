@@ -199,10 +199,7 @@ fn serializeErrorFields(comptime T: type, comptime name: []const u8, comptime pr
 
                 break :blk null;
             }
-            if (Union.tag_type) |Tag| {
-                if (!@typeInfo(Tag).Enum.is_exhaustive) {
-                    break :blk .{ .problem = T, .fields = prev ++ &[1][]const u8{name}, .info = "TODO: support serialization of unions tagged by non-exhaustive enums" };
-                }
+            if (Union.tag_type) |_| {
                 for (Union.fields) |field| {
                     if (serializeErrorFields(field.type, field.name, prev ++ &[1][]const u8{name})) |err| {
                         break :blk err;
@@ -418,10 +415,43 @@ pub fn Deserializer(comptime _endian: std.builtin.Endian, comptime _packing: Pac
                 },
 
                 .Union => |un| blk: {
-                    const TagType = un.tag_type.?;
-                    break :blk switch (try self.deserialize(TagType)) {
-                        inline else => |tag| @unionInit(T, @tagName(tag), try self.allocatingDeserialize(meta.TagPayload(T, tag), allocator)),
-                    };
+                    const Tag: type = un.tag_type.?;
+                    const tag: Tag = try self.deserialize(Tag);
+                    if (comptime @typeInfo(Tag).Enum.is_exhaustive) {
+                        switch (tag) {
+                            inline else => |field| {
+                                switch (comptime fasterDeserializeType(@TypeOf(@field(@as(T, undefined), @tagName(field))))) {
+                                    .pointer => {
+                                        var with_tag = @unionInit(T, @tagName(field), undefined);
+                                        self.allocatingDeserializeInto(&@field(with_tag, @tagName(field)), allocator);
+                                        break :blk with_tag;
+                                    },
+                                    .value => {
+                                        break :blk @unionInit(T, @tagName(field), try self.allocatingDeserialize(@TypeOf(@field(@as(T, undefined), @tagName(field))), allocator));
+                                    },
+                                }
+                            },
+                        }
+                    } else {
+                        inline for (un.fields) |field| {
+                            const field_tag = @field(Tag, field.name);
+                            const Payload = @TypeOf(@field(@as(T, undefined), field.name));
+                            if (field_tag == tag) {
+                                switch (comptime fasterDeserializeType(Payload)) {
+                                    .pointer => {
+                                        var with_tag = @unionInit(T, field.name, undefined);
+                                        self.allocatingDeserializeInto(&@field(with_tag, field.name), allocator);
+                                        break :blk with_tag;
+                                    },
+                                    .value => {
+                                        break :blk @unionInit(T, field.name, try self.allocatingDeserialize(Payload, allocator));
+                                    },
+                                }
+                            }
+                        }
+                        // unnamed tag value
+                        return error.Corrupt;
+                    }
                 },
 
                 else => default: {
@@ -476,18 +506,55 @@ pub fn Deserializer(comptime _endian: std.builtin.Endian, comptime _packing: Pac
                         .value => @field(ptr, field_info.name) = try self.allocatingDeserialize(@TypeOf(@field(ptr, field_info.name)), allocator),
                     }
                 },
-                .Union => |info| switch (try self.allocatingDeserialize(info.tag_type.?, allocator)) {
-                    inline else => |tag| {
-                        switch (comptime fasterDeserializeType(meta.TagPayload(T, tag))) {
-                            .pointer => {
-                                ptr.* = @unionInit(T, @tagName(tag), undefined);
-                                return self.allocatingDeserializeInto(&@field(ptr, @tagName(tag)), allocator);
-                            },
-                            .value => {
-                                ptr.* = @unionInit(T, @tagName(tag), try self.allocatingDeserialize(meta.TagPayload(T, tag), allocator));
+                .Union => |info| {
+                    const Tag: type = info.tag_type.?;
+                    const tag: Tag = try self.deserialize(Tag);
+                    if (@typeInfo(Tag).Enum.is_exhaustive) {
+                        switch (tag) {
+                            inline else => |field| {
+                                switch (comptime fasterDeserializeType(@TypeOf(@field(ptr, @tagName(field))))) {
+                                    .pointer => {
+                                        ptr.* = @unionInit(T, @tagName(field), undefined);
+                                        self.allocatingDeserializeInto(&@field(ptr, @tagName(field)), allocator);
+                                    },
+                                    .value => {
+                                        ptr.* = @unionInit(T, @tagName(tag), try self.allocatingDeserialize(@TypeOf(@field(ptr, @tagName(field))), allocator));
+                                    },
+                                }
                             },
                         }
-                    },
+                    } else {
+                        inline for (info.fields) |field| field_iter: {
+                            const field_tag = @field(Tag, field.name);
+                            if (field_tag == tag) {
+                                switch (comptime fasterDeserializeType(@TypeOf(@field(ptr, field.name)))) {
+                                    .pointer => {
+                                        ptr.* = @unionInit(T, field.name, undefined);
+                                        self.allocatingDeserializeInto(&@field(ptr, field.name), allocator);
+                                    },
+                                    .value => {
+                                        ptr.* = @unionInit(T, @tagName(tag), try self.allocatingDeserialize(@TypeOf(@field(ptr, field.name)), allocator));
+                                    },
+                                }
+                                break :field_iter;
+                            }
+                        }
+                        return error.Corrupt;
+                    }
+
+                    //                     break :blk switch (try self.allocatingDeserialize(Tag, allocator)) {
+                    //                         inline else => |tag| {
+                    //                             switch (comptime fasterDeserializeType(meta.TagPayload(T, tag))) {
+                    //                                 .pointer => {
+                    //                                     ptr.* = @unionInit(T, @tagName(tag), undefined);
+                    //                                     return self.allocatingDeserializeInto(&@field(ptr, @tagName(tag)), allocator);
+                    //                                 },
+                    //                                 .value => {
+                    //                                     ptr.* = @unionInit(T, @tagName(tag), try self.allocatingDeserialize(meta.TagPayload(T, tag), allocator));
+                    //                                 },
+                    //                             }
+                    //                         },
+                    //                     };
                 },
                 .Array => {
                     for (ptr) |*item| {
@@ -605,8 +672,8 @@ pub fn Serializer(comptime _endian: std.builtin.Endian, comptime _packing: Packi
                 return @field(T, custom_serialize_fn_name)(value, self);
             } else switch (@typeInfo(T)) {
                 .Void, .Undefined, .Null => return void{},
-                .Bool => return try self.serializeInt(u1, @intFromBool(value)),
-                .Float, .Int => return try self.serializeInt(T, value),
+                .Bool => try self.serializeInt(u1, @intFromBool(value)),
+                .Float, .Int => try self.serializeInt(T, value),
                 .Struct => |info| {
                     if (comptime intSerializable(T)) {
                         try self.serializeInt(T, value);
@@ -616,22 +683,25 @@ pub fn Serializer(comptime _endian: std.builtin.Endian, comptime _packing: Packi
                         try self.serialize(FieldType, @field(value, name));
                     }
                 },
-                .Union => |info| {
-                    if (info.tag_type) |TagType| {
-                        if (!@typeInfo(TagType).Enum.is_exhaustive)
-                            @compileError("TODO: support serialization/deserialization of unions tagged by non-exhaustive enums");
-
-                        switch (value) {
-                            inline else => |field| {
-                                const FieldType: type = @TypeOf(field);
-                                const tag: TagType = value;
-                                try self.serialize(TagType, tag);
-                                return self.serialize(FieldType, field);
-                            },
+                .Union => |info| union_blk: {
+                    const TagType = info.tag_type.?;
+                    if (!@typeInfo(TagType).Enum.is_exhaustive) {
+                        try self.serialize(TagType, value);
+                        inline for (info.fields) |field| {
+                            const field_enum: TagType = @field(TagType, field.name);
+                            if (field_enum == value) {
+                                try self.serialize(field.type, @field(value, field.name));
+                                break :union_blk;
+                            }
                         }
-                    } else {
-                        // handled by compiler error for untagged unions
-                        comptime unreachable;
+                        unreachable;
+                    } else switch (value) {
+                        inline else => |field| {
+                            const FieldType: type = @TypeOf(field);
+                            const tag: TagType = value;
+                            try self.serialize(TagType, tag);
+                            return self.serialize(FieldType, field);
+                        },
                     }
                 },
                 .Optional => |op| {
@@ -891,7 +961,14 @@ test "Serializer/Deserializer generic" {
         R32 = 3,
     };
 
-    const TagAlign = union(enum(u32)) {
+    const TagNonExhaustive = enum(u32) {
+        A,
+        B,
+        C,
+        _,
+    };
+
+    const NonExhaustiveUnion = union(TagNonExhaustive) {
         A: u8,
         B: u8,
         C: u8,
@@ -937,7 +1014,7 @@ test "Serializer/Deserializer generic" {
     const MyStruct = struct {
         f_i3: i3,
         f_u8: u8,
-        f_tag_align: TagAlign,
+        f_non_exhaustive_union: NonExhaustiveUnion,
         f_u24: u24,
         f_i19: i19,
         f_void: void,
@@ -960,7 +1037,7 @@ test "Serializer/Deserializer generic" {
     const my_inst = MyStruct{
         .f_i3 = -1,
         .f_u8 = 8,
-        .f_tag_align = TagAlign{ .B = 148 },
+        .f_non_exhaustive_union = .{ .B = 148 },
         .f_u24 = 24,
         .f_i19 = 19,
         .f_void = void{},
