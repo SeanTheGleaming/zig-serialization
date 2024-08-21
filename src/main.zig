@@ -188,6 +188,7 @@ fn serializeErrorFields(comptime T: type, comptime name: []const u8, comptime pr
             }
             break :blk null;
         },
+
         .Union => |Union| blk: {
             if (usesCustomSerialize(T)) {
                 if (@hasDecl(T, "__serialization_impl_unserializable")) {

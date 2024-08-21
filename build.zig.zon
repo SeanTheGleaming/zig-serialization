@@ -1,14 +1,7 @@
 .{
     .name = "serialization",
-    .version = "0.0.0",
+    .version = "0.0.1",
     .minimum_zig_version = "0.13.0",
-
-    .dependencies = .{
-        .module_package = .{
-            .url = "https://github.com/SeanTheGleaming/zig-module-package/archive/566887e.tar.gz",
-            .hash = "1220218ba63c306fb2a6b93bfd3e2219f6448a2d37e9e53fe3d73217a3a8e3e0fa34",
-        },
-    },
 
     .paths = .{
         "build.zig",
