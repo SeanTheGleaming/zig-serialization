@@ -8,7 +8,6 @@ pub fn build(b: *std.Build) void {
     const fmt_step = b.step("fmt", "Format the source code");
     const test_step = b.step("test", "Run the unit tests");
     const doc_step = b.step("doc", "Install the docs");
-    doc_step.dependOn(fmt_step);
     install_step.dependOn(doc_step);
 
     const release_step = b.step("release", "Format source, install docs and run unit tests");
@@ -37,7 +36,8 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    test_step.dependOn(&tests.step);
+    const run_tests = b.addRunArtifact(tests);
+    test_step.dependOn(&run_tests.step);
 
     const doc_compile = b.addObject(.{
         .name = "Serialization",
@@ -45,6 +45,8 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+    doc_compile.step.dependOn(&fmt.step);
+
     const docs = doc_compile.getEmittedDocs();
     const doc_install = b.addInstallDirectory(.{
         .install_dir = .{ .custom = "doc" },

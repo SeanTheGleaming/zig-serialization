@@ -412,14 +412,14 @@ pub fn Deserializer(comptime endianness: std.builtin.Endian, comptime packing_mo
 
         /// T should have a well defined memory layout and bit width
         fn deserializeInt(self: *Self, comptime Int: type) !Int {
-            return switch (comptime packing) {
+            return switch (packing) {
                 .bit => bitio.bitReadInt(&self.reader, Int),
                 .byte => bitio.byteReadInt(&self.reader, endian, Int),
             };
         }
 
         fn deserializeEnum(self: *Self, comptime Enum: type) !Enum {
-            return switch (comptime packing) {
+            return switch (packing) {
                 .bit => bitio.bitReadEnum(&self.reader, Enum),
                 .byte => bitio.byteReadEnum(&self.reader, endian, Enum),
             };
@@ -519,11 +519,11 @@ pub fn Deserializer(comptime endianness: std.builtin.Endian, comptime packing_mo
                 .Union => |info| blk: {
                     const Tag: type = info.tag_type.?;
                     const tag: Tag = try self.deserialize(Tag);
-                    if (comptime @typeInfo(Tag).Enum.is_exhaustive) {
+                    if (@typeInfo(Tag).Enum.is_exhaustive) {
                         switch (tag) {
                             inline else => |field| {
                                 const Payload: type = @TypeOf(@field(@as(T, undefined), @tagName(field)));
-                                switch (comptime fasterDeserializeType(Payload)) {
+                                switch (fasterDeserializeType(Payload)) {
                                     .pointer => {
                                         var with_tag = @unionInit(T, @tagName(field), undefined);
                                         try self.allocatingDeserializeInto(&@field(with_tag, @tagName(field)), allocator);
@@ -547,7 +547,7 @@ pub fn Deserializer(comptime endianness: std.builtin.Endian, comptime packing_mo
                             const field_tag = @field(Tag, field.name);
                             const Payload = @TypeOf(@field(@as(T, undefined), field.name));
                             if (field_tag == tag) {
-                                switch (comptime fasterDeserializeType(Payload)) {
+                                switch (fasterDeserializeType(Payload)) {
                                     .pointer => {
                                         var with_tag = @unionInit(T, field.name, undefined);
                                         try self.allocatingDeserializeInto(&@field(with_tag, field.name), allocator);
@@ -808,7 +808,7 @@ pub fn Serializer(comptime endianness: std.builtin.Endian, comptime packing_mode
             if (!integerLayout(Int))
                 @compileError("Cannot use serializeInt on type " ++ @typeName(Int) ++ ", whose layout is not portable");
 
-            return switch (comptime packing) {
+            return switch (packing) {
                 .bit => bitio.bitWriteInt(&self.writer, Int, value),
                 .byte => bitio.byteWriteInt(&self.writer, endian, Int, value),
             };
@@ -818,7 +818,7 @@ pub fn Serializer(comptime endianness: std.builtin.Endian, comptime packing_mode
             if (@typeInfo(Enum) != .Enum)
                 @compileError("Cannot use serializeEnum on type " ++ @typeName(Enum) ++ ", which is not an enum");
 
-            return switch (comptime packing) {
+            return switch (packing) {
                 .bit => bitio.bitWriteEnum(&self.writer, Enum, tag),
                 .byte => bitio.byteWriteEnum(&self.writer, endian, Enum, tag),
             };
@@ -940,23 +940,23 @@ pub inline fn isDeserializer(comptime T: type) bool {
 
 /// At comptime, assert that type `T` is a `Serializer` type
 pub inline fn assertSerializerType(comptime T: type) void {
-    if (comptime !isSerializer(T))
+    if (!isSerializer(T))
         @compileError("Type " ++ @typeName(T) ++ " is not a serializer");
 }
 /// At comptime, assert that type `T` is a `Deserializer` type
 pub inline fn assertDeserializerType(comptime T: type) void {
-    if (comptime !isDeserializer(T))
+    if (!isDeserializer(T))
         @compileError("Type " ++ @typeName(T) ++ " is not a deserializer");
 }
 /// At comptime, assert that the given value is a `Serializer`
 pub inline fn assertSerializer(serializer_value: anytype) void {
     const T = @TypeOf(serializer_value);
-    comptime assertSerializerType(T);
+    assertSerializerType(T);
 }
 /// At comptime, assert that the given value is a `Deserializer`
 pub inline fn assertDeserializer(deserializer_value: anytype) void {
     const T = @TypeOf(deserializer_value);
-    comptime assertDeserializerType(T);
+    assertDeserializerType(T);
 }
 
 /// Create a `Serializer` from a `writer`, `packing`, and `endian`
@@ -1036,7 +1036,9 @@ fn testIntSerializerDeserializer(comptime endian: std.builtin.Endian, comptime p
     const total_bytes: comptime_int = comptime blk: {
         var bytes: comptime_int = 0;
         var i: comptime_int = 0;
-        while (i <= max_test_bitsize) : (i += 1) bytes += (i / 8) + @as(comptime_int, @intFromBool(i % 8 > 0));
+        while (i <= max_test_bitsize) : (i += 1) {
+            bytes += (i / 8) + @as(comptime_int, @intFromBool(i % 8 > 0));
+        }
         break :blk bytes * 2;
     };
 
