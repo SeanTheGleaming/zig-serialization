@@ -35,6 +35,8 @@ pub fn build(b: *std.Build) void {
         .root_source_file = root,
         .target = target,
         .optimize = optimize,
+        .use_llvm = b.option(bool, "use-llvm", "Whether to use the llvm backend"),
+        .use_lld = b.option(bool, "use-lld", "Whether to use the lld linker"),
     });
     const run_tests = b.addRunArtifact(tests);
     test_step.dependOn(&run_tests.step);

@@ -317,19 +317,17 @@ pub inline fn canSerialize(comptime T: type) bool {
 /// Whether an allocator is required for deserializtion of type `T`
 pub inline fn deserializeNeedsAllocator(comptime T: type) bool {
     return if (!canSerialize(T)) false else switch (@typeInfo(T)) {
-        .Struct => blk: {
-            const fields = meta.fields(T);
-            inline for (fields) |field| {
+        .Struct => |info| blk: {
+            inline for (info.fields) |field| {
                 if (deserializeNeedsAllocator(field.type)) break :blk true;
             }
             break :blk false;
         },
-        .Union => |Union| blk: {
-            if (Union.tag_type) |Tag| {
+        .Union => |info| blk: {
+            if (info.tag_type) |Tag| {
                 if (deserializeNeedsAllocator(Tag)) break :blk true;
             }
-            const fields = meta.fields(T);
-            inline for (fields) |field| {
+            inline for (info.fields) |field| {
                 if (deserializeNeedsAllocator(field.type)) break :blk true;
             }
             break :blk false;
@@ -339,8 +337,8 @@ pub inline fn deserializeNeedsAllocator(comptime T: type) bool {
 }
 
 inline fn integerLayout(comptime T: type) bool {
-    return bitio.noData(T) or switch (@typeInfo(T)) {
-        .Int, .Float, .Void, .Null, .Undefined => true,
+    return switch (@typeInfo(T)) {
+        .Int, .Float => true,
         .Vector => |info| integerLayout(info.child),
         .Struct => |info| info.layout == .@"packed",
         .Union => |info| info.layout == .@"packed",
@@ -412,6 +410,9 @@ pub fn Deserializer(comptime endianness: std.builtin.Endian, comptime packing_mo
 
         /// T should have a well defined memory layout and bit width
         fn deserializeInt(self: *Self, comptime Int: type) !Int {
+            if (!integerLayout(Int))
+                @compileError("Cannot use deserializeInt on type " ++ @typeName(Int) ++ ", whose layout is not portable");
+
             return switch (packing) {
                 .bit => bitio.bitReadInt(&self.reader, Int),
                 .byte => bitio.byteReadInt(&self.reader, endian, Int),
@@ -419,6 +420,9 @@ pub fn Deserializer(comptime endianness: std.builtin.Endian, comptime packing_mo
         }
 
         fn deserializeEnum(self: *Self, comptime Enum: type) !Enum {
+            if (@typeInfo(Enum) != .Enum)
+                @compileError("Cannot use deserializeEnum on type " ++ @typeName(Enum) ++ ", which is not an enum");
+
             return switch (packing) {
                 .bit => bitio.bitReadEnum(&self.reader, Enum),
                 .byte => bitio.byteReadEnum(&self.reader, endian, Enum),
@@ -486,17 +490,18 @@ pub fn Deserializer(comptime endianness: std.builtin.Endian, comptime packing_mo
                 };
                 const result = blk: {
                     var buf: T = undefined;
-                    reader.readNoEof(std.mem.asBytes(&buf)) catch |err| switch (err) {
-                        error.EndOfStream => return error.Corrupt,
-                        else => return err,
-                    };
+                    try reader.readNoEof(std.mem.asBytes(&buf));
                     break :blk buf;
                 };
                 return result;
             }
 
             if (intSerializable(T)) {
-                return self.deserializeInt(T);
+                const U = @Type(.{ .Int = .{
+                    .signedness = .unsigned,
+                    .bits = @bitSizeOf(T),
+                } });
+                return @bitCast(try self.deserializeInt(U));
             } else return switch (@typeInfo(T)) {
                 .Undefined => @as(@TypeOf(undefined), undefined),
                 .Void => void{},
@@ -648,17 +653,16 @@ pub fn Deserializer(comptime endianness: std.builtin.Endian, comptime packing_mo
                     },
                     .byte => self.reader,
                 };
-                return reader.readNoEof(std.mem.asBytes(ptr)) catch |err| {
-                    if (err == error.EndOfStream) {
-                        return error.Corrupt;
-                    } else {
-                        return err;
-                    }
-                };
+                return reader.readNoEof(std.mem.asBytes(ptr));
+            }
+
+            if (intSerializable(T)) {
+                ptr.* = try self.deserialize(T);
+                return;
             }
 
             switch (@typeInfo(T)) {
-                .Float, .Int => ptr.* = try self.deserializeInt(T), // handled with the intSerializable(T) check
+                .Float, .Int => ptr.* = try self.deserializeInt(T), // handled with the intSerializable check
                 .Void, .Undefined, .Null, .Enum, .Bool, .Optional => ptr.* = try self.deserialize(T),
                 .Struct => |info| inline for (info.fields) |field_info| {
                     switch (fasterDeserializeType(@TypeOf(@field(ptr, field_info.name)))) {
@@ -702,20 +706,8 @@ pub fn Deserializer(comptime endianness: std.builtin.Endian, comptime packing_mo
                         return error.Corrupt;
                     }
                 },
-                .Array => |info| {
-                    if (intSerializable(info.child) and @bitSizeOf(info.child) == 8) {
-                        const reader = switch (packing) {
-                            .bit => self.reader.reader(),
-                            .byte => self.reader,
-                        };
-                        return reader.readNoEof(std.mem.asBytes(ptr)) catch |err| {
-                            if (err == error.EndOfStream) {
-                                return error.Corrupt;
-                            } else {
-                                return err;
-                            }
-                        };
-                    } else for (ptr) |*item| {
+                .Array => {
+                    for (ptr) |*item| {
                         try self.allocatingDeserializeInto(item, allocator);
                     }
                 },
@@ -853,7 +845,11 @@ pub fn Serializer(comptime endianness: std.builtin.Endian, comptime packing_mode
                 return writer.writeAll(std.mem.asBytes(&value));
             }
             if (intSerializable(T)) {
-                return self.serializeInt(T, value);
+                const U = @Type(.{ .Int = .{
+                    .signedness = .unsigned,
+                    .bits = @bitSizeOf(T),
+                } });
+                return self.serializeInt(U, @bitCast(value));
             } else switch (@typeInfo(T)) {
                 .Void, .Undefined, .Null => return void{},
                 .Bool => try self.serializeInt(u1, @intFromBool(value)),
@@ -1030,7 +1026,6 @@ fn testSerializable(comptime T: type, x: T, allocator: mem.Allocator, testEqualF
 /// Test basic functionality of serializing integers
 fn testIntSerializerDeserializer(comptime endian: std.builtin.Endian, comptime packing: Packing) !void {
     const max_test_bitsize: comptime_int = 128;
-
     @setEvalBranchQuota(max_test_bitsize * 10);
 
     const total_bytes: comptime_int = comptime blk: {
@@ -1051,8 +1046,14 @@ fn testIntSerializerDeserializer(comptime endian: std.builtin.Endian, comptime p
 
     comptime var i: comptime_int = 0;
     inline while (i <= max_test_bitsize) : (i += 1) {
-        const U: type = meta.Int(.unsigned, i);
-        const S: type = meta.Int(.signed, i);
+        const U: type = @Type(.{ .Int = .{
+            .signedness = .unsigned,
+            .bits = i,
+        } });
+        const S: type = @Type(.{ .Int = .{
+            .signedness = .signed,
+            .bits = i,
+        } });
         try _serializer.serializeInt(U, i);
         if (i != 0) try _serializer.serializeInt(S, -1) else try _serializer.serialize(S, 0);
     }
@@ -1060,10 +1061,16 @@ fn testIntSerializerDeserializer(comptime endian: std.builtin.Endian, comptime p
 
     i = 0;
     inline while (i <= max_test_bitsize) : (i += 1) {
-        const U: type = meta.Int(.unsigned, i);
-        const S: type = meta.Int(.signed, i);
-        const x: U = try _deserializer.deserializeInt(U);
-        const y: S = try _deserializer.deserializeInt(S);
+        const U: type = @Type(.{ .Int = .{
+            .signedness = .unsigned,
+            .bits = i,
+        } });
+        const S: type = @Type(.{ .Int = .{
+            .signedness = .signed,
+            .bits = i,
+        } });
+        const x: U = try _deserializer.deserialize(U);
+        const y: S = try _deserializer.deserialize(S);
         try testing.expectEqual(x, @as(U, i));
         if (i != 0) {
             try testing.expectEqual(y, @as(S, -1));
