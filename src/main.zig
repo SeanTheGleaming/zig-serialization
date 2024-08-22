@@ -448,7 +448,6 @@ pub fn Deserializer(comptime endianness: std.builtin.Endian, comptime packing_mo
         ///
         /// The 'ptr' argument is generic so that it can take in pointers to packed struct fields, etc
         pub fn allocatingDeserialize(self: *Self, comptime T: type, allocator: mem.Allocator) !T {
-            defer self.alignToByte();
             if (serializeTypeErrorMessage(T)) |err| {
                 @compileError(err);
             }
@@ -590,7 +589,6 @@ pub fn Deserializer(comptime endianness: std.builtin.Endian, comptime packing_mo
         ///
         /// The 'ptr' argument is generic so that it can take in pointers to packed struct fields, etc
         pub fn allocatingDeserializeInto(self: *Self, ptr: anytype, allocator: mem.Allocator) !void {
-            defer self.alignToByte();
             const Ptr = @TypeOf(ptr);
             const ptr_info = @typeInfo(@TypeOf(ptr));
 
@@ -828,7 +826,6 @@ pub fn Serializer(comptime endianness: std.builtin.Endian, comptime packing_mode
 
         /// Serializes the passed value into the writer
         pub fn serialize(self: *Self, comptime T: type, value: T) !void {
-            defer self.flush() catch unreachable;
             if (serializeTypeErrorMessage(T)) |err| {
                 @compileError(err);
             } else if (usesCustomSerialize(T)) {

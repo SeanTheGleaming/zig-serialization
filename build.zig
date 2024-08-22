@@ -1,10 +1,5 @@
 const std = @import("std");
 
-// Expose the module to dependant build scripts,
-// in case you for some reason want to use this
-// inside a build script
-pub usingnamespace @import("src/main.zig");
-
 pub fn build(b: *std.Build) void {
     const src_dir = "src";
 
