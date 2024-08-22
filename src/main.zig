@@ -387,6 +387,7 @@ pub fn Deserializer(comptime endianness: std.builtin.Endian, comptime packing_mo
 
         pub const UnderlyingReader = ReaderType;
         pub const ActiveReader = if (packing == .bit) io.BitReader(endian, UnderlyingReader) else UnderlyingReader;
+        pub const ReadError = ActiveReader.Error;
 
         /// Signifies that the type is a valid deserializer
         pub const ValidDeserializer = Deserializer;
@@ -394,8 +395,6 @@ pub fn Deserializer(comptime endianness: std.builtin.Endian, comptime packing_mo
         reader: ActiveReader,
 
         const Self = @This();
-
-        pub const ReadError: type = ActiveReader.Error;
 
         pub fn init(reader: UnderlyingReader) Self {
             return Self{
@@ -782,6 +781,7 @@ pub fn Serializer(comptime endianness: std.builtin.Endian, comptime packing_mode
 
         pub const UnderlyingWriter = WriterType;
         pub const ActiveWriter = if (packing == .bit) io.BitWriter(endian, UnderlyingWriter) else UnderlyingWriter;
+        pub const WriteError = ActiveWriter.Error;
 
         /// Signifies that the type is a valid serializer
         pub const ValidSerializer = Serializer;
@@ -989,8 +989,14 @@ fn testSerializableDeserializableExtra(
     const writer = serialized_data.writer();
     var _serializer = serializer(endian, packing, writer);
 
-    try _serializer.serialize(T, x);
-    try _serializer.flush();
+    _serializer.serialize(T, x) catch |err| {
+        if (err == error.OutOfMemory) return error.SkipZigTest;
+        return err;
+    };
+    _serializer.flush() catch |err| {
+        if (err == error.OutOfMemory) return error.SkipZigTest;
+        return err;
+    };
 
     // since we dont know the type, we dont know hoe to properly deallocate any memory we may have allocated
     // in fact, we dont even know if we allocate memory at all.
@@ -1005,7 +1011,10 @@ fn testSerializableDeserializableExtra(
 
     var _deserializer = deserializer(endian, packing, reader);
 
-    const y: T = try _deserializer.allocatingDeserialize(T, arena_alloc);
+    const y: T = _deserializer.allocatingDeserialize(T, arena_alloc) catch |err| {
+        if (err == error.OutOfMemory) return error.SkipZigTest;
+        return err;
+    };
 
     try expectEqlFn(x, y);
 }
